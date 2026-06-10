@@ -6,7 +6,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ─── CONSTANTS ──────────────────────────────────────────────────────────────────
-const SOURCES = ["Google", "Meta", "Site", "WhatsApp"];
+const SOURCES = ["Google", "Meta", "Site", "WhatsApp", "Prospecção Ativa"];
 
 const ACTIVITY_TYPES = {
   note:          { label: "Anotação",  dot: "#94A3B8" },
@@ -19,10 +19,11 @@ const ACTIVITY_TYPES = {
 };
 
 const SOURCE_COLORS = {
-  Google:   { bg: "#DBEAFE", text: "#1E40AF" },
-  Meta:     { bg: "#EDE9FE", text: "#5B21B6" },
-  Site:     { bg: "#D1FAE5", text: "#065F46" },
-  WhatsApp: { bg: "#DCFCE7", text: "#166534" },
+  Google:            { bg: "#DBEAFE", text: "#1E40AF" },
+  Meta:              { bg: "#EDE9FE", text: "#5B21B6" },
+  Site:              { bg: "#D1FAE5", text: "#065F46" },
+  WhatsApp:          { bg: "#DCFCE7", text: "#166534" },
+  "Prospecção Ativa": { bg: "#FFEDD5", text: "#C2410C" },
 };
 
 const STAGE_PRESETS = [
@@ -89,8 +90,8 @@ function slugify(text) {
 }
 
 function exportCSV(leads) {
-  const headers = ["Nome","Email","Telefone","Origem","Status","Tags","Follow-up","UTM Source","UTM Medium","UTM Campaign","Anúncio","Anotações","Data"];
-  const rows = leads.map(l => [l.name,l.email,l.phone,l.source,l.status,(l.tags||[]).join(";"),l.follow_up_at||"",l.utm_source,l.utm_medium,l.utm_campaign,l.ad,l.notes,l.created_at?.slice(0,10)]);
+  const headers = ["Nome","Empresa","Endereço","Email","Telefone","Origem","Status","Tags","Entrada","Início Contrato","Fim Contrato","Follow-up","UTM Source","UTM Medium","UTM Campaign","Anúncio","Anotações"];
+  const rows = leads.map(l => [l.name,l.company_name||"",l.address||"",l.email,l.phone,l.source,l.status,(l.tags||[]).join(";"),l.created_at?.slice(0,10)||"",l.contract_start||"",l.contract_end||"",l.follow_up_at||"",l.utm_source,l.utm_medium,l.utm_campaign,l.ad,l.notes]);
   const csv = [headers,...rows].map(r => r.map(v => `"${String(v??'').replace(/"/g,'""')}"`).join(",")).join("\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
@@ -625,23 +626,29 @@ function SettingsModal({ company, leads, onClose, onRefreshLabels, onRefreshStag
     if (!newLabelName.trim()) return;
     setSavingLabel(true);
     const c = LABEL_COLORS[newLabelColor];
-    await supabase.from("labels").insert({ company_id: company.id, name: newLabelName.trim(), bg: c.bg, text_color: c.text_color, position: labels.length });
-    setNewLabelName(""); setSavingLabel(false); onRefreshLabels();
+    const { error } = await supabase.from("labels").insert({ company_id: company.id, name: newLabelName.trim(), bg: c.bg, text_color: c.text_color, position: labels.length });
+    setSavingLabel(false);
+    if (error) { window.alert("Erro ao criar etiqueta: " + error.message); return; }
+    setNewLabelName(""); onRefreshLabels();
   };
 
   const deleteLabel = async (id) => {
     const label = labels.find(l => l.id === id);
     const inUse = leads.filter(l => (l.tags || []).includes(label?.name)).length;
     if (inUse > 0 && !window.confirm(`Esta etiqueta está em ${inUse} lead(s). Remover mesmo assim?`)) return;
-    await supabase.from("labels").delete().eq("id", id); onRefreshLabels();
+    const { error } = await supabase.from("labels").delete().eq("id", id);
+    if (error) { window.alert("Erro ao remover etiqueta: " + error.message); return; }
+    onRefreshLabels();
   };
 
   const createStage = async () => {
     if (!newStageName.trim()) return;
     setSavingStage(true);
     const c = STAGE_PRESETS[newStageColor];
-    await supabase.from("pipeline_stages").insert({ company_id: company.id, name: newStageName.trim(), bar: c.bar, bg: c.bg, text_color: c.text_color, border_color: c.border_color, position: stages.length });
-    setNewStageName(""); setSavingStage(false); onRefreshStages();
+    const { error } = await supabase.from("pipeline_stages").insert({ company_id: company.id, name: newStageName.trim(), bar: c.bar, bg: c.bg, text_color: c.text_color, border_color: c.border_color, position: stages.length });
+    setSavingStage(false);
+    if (error) { window.alert("Erro ao criar estágio: " + error.message); return; }
+    setNewStageName(""); onRefreshStages();
   };
 
   const deleteStage = async (id) => {
@@ -649,18 +656,24 @@ function SettingsModal({ company, leads, onClose, onRefreshLabels, onRefreshStag
     const stage = stages.find(s => s.id === id);
     const inUse = leads.filter(l => l.status === stage?.name).length;
     if (inUse > 0) { window.alert(`Não é possível remover "${stage.name}" — ${inUse} lead(s) estão neste estágio. Mova-os primeiro.`); return; }
-    await supabase.from("pipeline_stages").delete().eq("id", id); onRefreshStages();
+    const { error } = await supabase.from("pipeline_stages").delete().eq("id", id);
+    if (error) { window.alert("Erro ao remover estágio: " + error.message); return; }
+    onRefreshStages();
   };
 
   const createReply = async () => {
     if (!newReplyTitle.trim() || !newReplyBody.trim()) return;
     setSavingReply(true);
-    await supabase.from("quick_replies").insert({ company_id: company.id, title: newReplyTitle.trim(), body: newReplyBody.trim(), position: quickReplies.length });
-    setNewReplyTitle(""); setNewReplyBody(""); setSavingReply(false); onRefreshReplies();
+    const { error } = await supabase.from("quick_replies").insert({ company_id: company.id, title: newReplyTitle.trim(), body: newReplyBody.trim(), position: quickReplies.length });
+    setSavingReply(false);
+    if (error) { window.alert("Erro ao criar resposta rápida: " + error.message); return; }
+    setNewReplyTitle(""); setNewReplyBody(""); onRefreshReplies();
   };
 
   const deleteReply = async (id) => {
-    await supabase.from("quick_replies").delete().eq("id", id); onRefreshReplies();
+    const { error } = await supabase.from("quick_replies").delete().eq("id", id);
+    if (error) { window.alert("Erro ao remover resposta rápida: " + error.message); return; }
+    onRefreshReplies();
   };
 
   return (
@@ -935,6 +948,7 @@ function TableView({ leads, onEdit, onDelete }) {
                 <div className="flex items-center gap-3">
                   <div>
                     <div className="font-semibold text-slate-900 text-sm">{lead.name}</div>
+                    {lead.company_name && <div className="text-xs text-slate-600 font-medium">{lead.company_name}</div>}
                     <div className="text-xs text-slate-400">{lead.email || "—"}</div>
                   </div>
                 </div>
@@ -1371,6 +1385,8 @@ function LeadModal({ lead, companyId, userId, onClose, onSaved, team, onManageLa
   const stages      = useContext(StagesCtx);
   const quickReplies = useContext(QuickRepliesCtx);
   const blank = { name:"", email:"", phone:"", source:"Google", status: stages[0]?.name || "Novo",
+    company_name:"", address:"",
+    contract_start:"", contract_end:"",
     utm_source:"", utm_medium:"", utm_campaign:"", utm_content:"", ad:"", notes:"", tags:[], assigned_to:"", follow_up_at:"" };
   const [form, setForm]         = useState({ ...(lead || blank), tags: lead?.tags || [], follow_up_at: lead?.follow_up_at || "" });
   const [panelTab, setPanelTab] = useState("dados");
@@ -1529,6 +1545,14 @@ function LeadModal({ lead, companyId, userId, onClose, onSaved, team, onManageLa
                   <label className={lbl}>Nome *</label>
                   <input className={inp} value={form.name} onChange={e => set("name", e.target.value)} placeholder="Nome completo" />
                 </div>
+                <div>
+                  <label className={lbl}>Empresa</label>
+                  <input className={inp} value={form.company_name || ""} onChange={e => set("company_name", e.target.value)} placeholder="Nome da empresa" />
+                </div>
+                <div>
+                  <label className={lbl}>Endereço</label>
+                  <input className={inp} value={form.address || ""} onChange={e => set("address", e.target.value)} placeholder="Rua, número, cidade..." />
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={lbl}>Email</label>
@@ -1554,19 +1578,17 @@ function LeadModal({ lead, companyId, userId, onClose, onSaved, team, onManageLa
                   </div>
                 </div>
 
-                {team?.length > 0 && (
-                  <div>
-                    <label className={lbl}>Responsável</label>
-                    <select className={inp} value={form.assigned_to || ""} onChange={e => set("assigned_to", e.target.value || null)}>
-                      <option value="">Sem responsável</option>
-                      {team.map(m => (
-                        <option key={m.user_id} value={m.user_id}>
-                          {m.display_name || m.email.split("@")[0]}{m.user_id === userId ? " (você)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+                <div>
+                  <label className={lbl}>Responsável</label>
+                  <select className={inp} value={form.assigned_to || ""} onChange={e => set("assigned_to", e.target.value || null)}>
+                    <option value="">Sem responsável</option>
+                    {team.map(m => (
+                      <option key={m.user_id} value={m.user_id}>
+                        {m.display_name || m.email.split("@")[0]}{m.user_id === userId ? " (você)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
                 {/* Follow-up date */}
                 <div>
@@ -1580,6 +1602,24 @@ function LeadModal({ lead, companyId, userId, onClose, onSaved, team, onManageLa
                     )}
                   </div>
                   {form.follow_up_at && <FollowUpBadge date={form.follow_up_at} />}
+                </div>
+
+                <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 space-y-3">
+                  <div className="text-xs font-black text-slate-400 uppercase tracking-widest">Datas</div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Entrada</label>
+                      <input type="date" className={smInp} value={lead?.created_at?.slice(0,10) || ""} readOnly tabIndex={-1} style={{cursor:"default",background:"#f1f5f9"}} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Início contrato</label>
+                      <input type="date" className={smInp} value={form.contract_start || ""} onChange={e => set("contract_start", e.target.value || null)} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Fim contrato</label>
+                      <input type="date" className={smInp} value={form.contract_end || ""} onChange={e => set("contract_end", e.target.value || null)} />
+                    </div>
+                  </div>
                 </div>
 
                 {!isEdit && (
@@ -1963,6 +2003,7 @@ export default function App() {
   const [modal, setModal]       = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [inviteMsg, setInviteMsg]       = useState("");
+  const [inviteModal, setInviteModal]   = useState({ open: false, link: "", loading: false });
   const [filters, setFilters] = useState({ search: "", source: "", status: "", label: "", myLeads: false, followUpToday: false });
 
   useEffect(() => {
@@ -1978,7 +2019,8 @@ export default function App() {
 
   const fetchLeads = useCallback(async () => {
     if (!company) return;
-    const { data } = await supabase.from("leads").select("*").eq("company_id", company.id).order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("leads").select("*").eq("company_id", company.id).order("created_at", { ascending: false });
+    if (error) { console.error("Erro ao carregar leads:", error.message); return; }
     setLeads(data || []);
   }, [company]);
 
@@ -2031,20 +2073,24 @@ export default function App() {
   };
   const handleDelete = async (id) => {
     if (!window.confirm("Remover este lead?")) return;
-    await supabase.from("leads").delete().eq("id", id); fetchLeads();
+    const { error } = await supabase.from("leads").delete().eq("id", id);
+    if (error) { window.alert("Erro ao remover lead: " + error.message); return; }
+    fetchLeads();
   };
   const handleMove = async (leadId, toStatus, fromStatus) => {
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: toStatus } : l));
-    await supabase.from("leads").update({ status: toStatus }).eq("id", leadId);
+    const { error } = await supabase.from("leads").update({ status: toStatus }).eq("id", leadId);
+    if (error) {
+      setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: fromStatus } : l));
+      window.alert("Erro ao mover lead: " + error.message); return;
+    }
     await supabase.from("activities").insert({ lead_id: leadId, company_id: company.id, type: "status_change", content: `Status alterado de "${fromStatus}" para "${toStatus}"`, created_by: user.id });
   };
   const handleInvite = async () => {
+    setInviteModal({ open: true, link: "", loading: true });
     const { data, error } = await supabase.from("company_invites").insert({ company_id: company.id, created_by: user.id }).select("token").single();
-    if (error || !data) { window.alert("Erro ao gerar convite"); return; }
-    const link = `${window.location.origin}?invite=${data.token}`;
-    await navigator.clipboard.writeText(link);
-    setInviteMsg("Link copiado! Envie para o novo membro. Expira em 7 dias.");
-    setTimeout(() => setInviteMsg(""), 5000);
+    if (error || !data) { setInviteModal({ open: false, link: "", loading: false }); window.alert("Erro ao gerar convite"); return; }
+    setInviteModal({ open: true, link: `${window.location.origin}?invite=${data.token}`, loading: false });
   };
 
   const setFilter = (k, v) => setFilters(f => ({ ...f, [k]: v }));
@@ -2107,6 +2153,44 @@ export default function App() {
               {inviteMsg && (
                 <div className="mx-6 mt-4 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm flex items-center gap-2">
                   ✓ {inviteMsg}
+                </div>
+              )}
+
+              {inviteModal.open && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+                  <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setInviteModal({ open: false, link: "", loading: false })} />
+                  <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md z-10 p-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-base font-black text-slate-900">Convidar membro</h3>
+                      <button onClick={() => setInviteModal({ open: false, link: "", loading: false })}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100 transition text-lg">✕</button>
+                    </div>
+                    {inviteModal.loading ? (
+                      <div className="flex items-center justify-center py-8 text-slate-400 text-sm gap-2">
+                        <span className="w-4 h-4 border-2 border-slate-200 border-t-sky-500 rounded-full animate-spin" />
+                        Gerando link...
+                      </div>
+                    ) : (
+                      <>
+                        <p className="text-sm text-slate-500 mb-3">Envie este link para o novo membro. Válido por 7 dias.</p>
+                        <div className="flex gap-2">
+                          <input readOnly value={inviteModal.link}
+                            className="flex-1 px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-700 focus:outline-none"
+                            onFocus={e => e.target.select()} />
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(inviteModal.link).catch(() => {});
+                              setInviteModal(m => ({ ...m, copied: true }));
+                              setTimeout(() => setInviteModal(m => ({ ...m, copied: false })), 2000);
+                            }}
+                            className="px-4 py-2 rounded-lg text-white text-xs font-bold transition hover:opacity-90 flex-shrink-0"
+                            style={{ background: inviteModal.copied ? "#10B981" : "linear-gradient(135deg,#0EA5E9,#6366F1)" }}>
+                            {inviteModal.copied ? "✓ Copiado" : "Copiar"}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
 
