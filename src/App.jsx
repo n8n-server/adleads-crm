@@ -137,7 +137,7 @@ function FollowUpBadge({ date }) {
 
 // ─── FORM FIELD ─────────────────────────────────────────────────────────────────
 function Field({ label, value, onChange, type = "text", placeholder, onEnter }) {
-  const [show, setShow] = React.useState(false);
+  const [show, setShow] = useState(false);
   const isPassword = type === "password";
   return (
     <div>
