@@ -409,50 +409,79 @@ function LabelPicker({ tags, onChange, onManageLabels }) {
   );
 }
 
-// ─── QUICK REPLIES PANEL ─────────────────────────────────────────────────────────
-function QuickRepliesPanel({ leadName, onClose }) {
+// ─── RESPOSTAS RÁPIDAS (módulo standalone) ───────────────────────────────────────
+function RespostasRapidasView() {
   const quickReplies = useContext(QuickRepliesCtx);
+  const [nome, setNome] = useState("");
+  const [search, setSearch] = useState("");
   const [copiedId, setCopiedId] = useState(null);
 
   const copy = (qr) => {
-    const text = qr.body.replace(/\{\{nome\}\}/g, leadName || "Lead");
+    const text = qr.body.replace(/\{\{nome\}\}/g, nome.trim() || "Lead");
     navigator.clipboard.writeText(text);
     setCopiedId(qr.id);
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const groupOf = (title) => {
+    const m = title.match(/^\[([^\]]+)\]/);
+    return m ? m[1] : "Geral";
+  };
+
+  const q = search.trim().toLowerCase();
+  const filtered = quickReplies.filter(qr =>
+    !q || qr.title.toLowerCase().includes(q) || qr.body.toLowerCase().includes(q));
+
+  const groups = {};
+  filtered.forEach(qr => { (groups[groupOf(qr.title)] ||= []).push(qr); });
+
   return (
-    <div className="mx-5 mb-2 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
-      <div className="px-3 py-2.5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-        <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Respostas Rápidas</span>
-        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition text-sm w-5 h-5 flex items-center justify-center">✕</button>
+    <div className="space-y-5 max-w-2xl">
+      <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm space-y-3">
+        <div className="text-xs font-black text-slate-500 uppercase tracking-widest">Contato</div>
+        <input
+          className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
+          placeholder="Nome de quem vai receber (opcional)"
+          value={nome} onChange={e => setNome(e.target.value)} />
+        <input
+          className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
+          placeholder="Buscar script..."
+          value={search} onChange={e => setSearch(e.target.value)} />
       </div>
-      <div className="max-h-52 overflow-y-auto divide-y divide-slate-50">
-        {quickReplies.length === 0 ? (
-          <div className="px-3 py-5 text-xs text-slate-400 text-center">
-            Nenhuma resposta salva. Crie em Configurações → Respostas Rápidas.
-          </div>
-        ) : quickReplies.map(qr => (
-          <div key={qr.id} className="px-3 py-2.5 hover:bg-slate-50 transition">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-bold text-slate-700">{qr.title}</div>
-                <div className="text-xs text-slate-400 mt-0.5 line-clamp-2 whitespace-pre-wrap">
-                  {qr.body.replace(/\{\{nome\}\}/g, leadName || "Lead")}
+
+      {quickReplies.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-slate-300">
+          <div className="text-5xl mb-3">⚡</div>
+          <div className="text-sm">Nenhuma resposta rápida cadastrada ainda.</div>
+          <div className="text-xs mt-1">Crie em Leads → Configurações → Respostas.</div>
+        </div>
+      ) : Object.entries(groups).map(([group, items]) => (
+        <div key={group} className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 text-xs font-black text-slate-500 uppercase tracking-widest">{group}</div>
+          <div className="divide-y divide-slate-50">
+            {items.map(qr => (
+              <div key={qr.id} className="px-4 py-3 hover:bg-slate-50 transition">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-bold text-slate-700">{qr.title.replace(/^\[[^\]]+\]\s*/, "")}</div>
+                    <div className="text-xs text-slate-400 mt-1 whitespace-pre-wrap">
+                      {qr.body.replace(/\{\{nome\}\}/g, nome.trim() || "Lead")}
+                    </div>
+                  </div>
+                  <button onClick={() => copy(qr)}
+                    className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                      copiedId === qr.id
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-sky-50 text-sky-600 hover:bg-sky-100"
+                    }`}>
+                    {copiedId === qr.id ? "✓ Copiado!" : "Copiar"}
+                  </button>
                 </div>
               </div>
-              <button onClick={() => copy(qr)}
-                className={`flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold transition ${
-                  copiedId === qr.id
-                    ? "bg-emerald-100 text-emerald-700"
-                    : "bg-sky-50 text-sky-600 hover:bg-sky-100"
-                }`}>
-                {copiedId === qr.id ? "✓ Copiado!" : "Copiar"}
-              </button>
-            </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -527,9 +556,10 @@ function MemberNameEditor({ user, currentMember }) {
 // ─── SIDEBAR ─────────────────────────────────────────────────────────────────────
 function Sidebar({ company, user, tab, setTab, onLogout, team, onInvite, currentMember, onSettings, dark, onToggleTheme }) {
   const nav = [
-    { id: "dashboard", label: "Dashboard", icon: "◧" },
-    { id: "leads",     label: "Leads",     icon: "◈" },
-    { id: "julia",     label: "Julia",     icon: "🤖" },
+    { id: "dashboard",  label: "Dashboard",         icon: "◧" },
+    { id: "leads",      label: "Leads",             icon: "◈" },
+    { id: "julia",      label: "Julia",             icon: "🤖" },
+    { id: "respostas",  label: "Respostas Rápidas", icon: "⚡" },
   ];
   const btnBase = "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all text-left";
   return (
@@ -1058,9 +1088,12 @@ function Dashboard({ leads }) {
 // ─── TIMELINE ────────────────────────────────────────────────────────────────────
 function Timeline({ leadId, companyId, userId }) {
   const [activities, setActivities] = useState([]);
-  const [type, setType]     = useState("note");
+  const [type, setType]       = useState("note");
   const [content, setContent] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving]   = useState(false);
+  const [editingId, setEditingId]       = useState(null);
+  const [editContent, setEditContent]   = useState("");
+  const [editSaving, setEditSaving]     = useState(false);
 
   const load = useCallback(async () => {
     const { data } = await supabase.from("activities")
@@ -1075,6 +1108,22 @@ function Timeline({ leadId, companyId, userId }) {
     setSaving(true);
     await supabase.from("activities").insert({ lead_id: leadId, company_id: companyId, type, content: content.trim(), created_by: userId });
     setContent(""); setSaving(false); load();
+  };
+
+  const startEdit = (a) => { setEditingId(a.id); setEditContent(a.content); };
+  const cancelEdit = () => { setEditingId(null); setEditContent(""); };
+
+  const saveEdit = async (id) => {
+    if (!editContent.trim()) return;
+    setEditSaving(true);
+    await supabase.from("activities").update({ content: editContent.trim() }).eq("id", id);
+    setEditSaving(false); setEditingId(null); load();
+  };
+
+  const deleteActivity = async (id) => {
+    if (!window.confirm("Remover este registro?")) return;
+    await supabase.from("activities").delete().eq("id", id);
+    load();
   };
 
   const fmt = (iso) => {
@@ -1120,15 +1169,52 @@ function Timeline({ leadId, companyId, userId }) {
             <div className="space-y-4">
               {activities.map(a => {
                 const t = ACTIVITY_TYPES[a.type] || ACTIVITY_TYPES.note;
+                const isEditing = editingId === a.id;
+                const isSystem  = a.type === "created" || a.type === "status_change";
                 return (
                   <div key={a.id} className="flex gap-3 relative">
                     <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 z-10 ring-2 ring-white" style={{ background: t.dot }} />
                     <div className="flex-1 bg-white rounded-xl border border-slate-100 shadow-sm p-3 min-w-0">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-xs font-bold" style={{ color: t.dot }}>{t.label}</span>
-                        <span className="text-xs text-slate-300">{fmt(a.created_at)}</span>
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs text-slate-300">{fmt(a.created_at)}</span>
+                          {!isSystem && !isEditing && (
+                            <>
+                              <button onClick={() => startEdit(a)}
+                                className="w-5 h-5 rounded flex items-center justify-center text-slate-300 hover:text-sky-500 hover:bg-sky-50 transition text-xs ml-1">
+                                ✎
+                              </button>
+                              <button onClick={() => deleteActivity(a.id)}
+                                className="w-5 h-5 rounded flex items-center justify-center text-slate-300 hover:text-red-400 hover:bg-red-50 transition text-xs">
+                                ✕
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </div>
-                      <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">{a.content}</p>
+                      {isEditing ? (
+                        <div className="space-y-2">
+                          <textarea
+                            autoFocus
+                            className="w-full px-2.5 py-2 rounded-lg border border-sky-300 bg-white text-sm text-slate-900 resize-none focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
+                            rows={3}
+                            value={editContent}
+                            onChange={e => setEditContent(e.target.value)}
+                            onKeyDown={e => { if (e.key === "Enter" && e.metaKey) saveEdit(a.id); if (e.key === "Escape") cancelEdit(); }}
+                          />
+                          <div className="flex gap-2 justify-end">
+                            <button onClick={cancelEdit} className="px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-500 hover:bg-slate-100 transition">Cancelar</button>
+                            <button onClick={() => saveEdit(a.id)} disabled={editSaving || !editContent.trim()}
+                              className="px-2.5 py-1 rounded-lg text-xs font-bold text-white disabled:opacity-40 transition"
+                              style={{ background: "linear-gradient(135deg,#0EA5E9,#6366F1)" }}>
+                              {editSaving ? "..." : "Salvar"}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">{a.content}</p>
+                      )}
                     </div>
                   </div>
                 );
@@ -1381,19 +1467,22 @@ function WaFollowUpModal({ lead, companyId, userId, onClose, onSaved }) {
 }
 
 // ─── LEAD PANEL ───────────────────────────────────────────────────────────────────
-function LeadModal({ lead, companyId, userId, onClose, onSaved, team, onManageLabels }) {
+function LeadModal({ lead, companyId, userId, onClose, onSaved, onDelete, team, onManageLabels }) {
   const stages      = useContext(StagesCtx);
-  const quickReplies = useContext(QuickRepliesCtx);
   const blank = { name:"", email:"", phone:"", source:"Google", status: stages[0]?.name || "Novo",
     company_name:"", address:"",
-    contract_start:"", contract_end:"",
+    contract_start:null, contract_end:null,
     utm_source:"", utm_medium:"", utm_campaign:"", utm_content:"", ad:"", notes:"", tags:[], assigned_to:"", follow_up_at:"" };
-  const [form, setForm]         = useState({ ...(lead || blank), tags: lead?.tags || [], follow_up_at: lead?.follow_up_at || "" });
+  const coerce = (v) => v == null ? "" : v;
+  const [form, setForm]         = useState({ ...blank, ...(lead || {}), tags: lead?.tags || [], follow_up_at: lead?.follow_up_at || "",
+    email: coerce(lead?.email), phone: coerce(lead?.phone), notes: coerce(lead?.notes),
+    utm_source: coerce(lead?.utm_source), utm_medium: coerce(lead?.utm_medium), utm_campaign: coerce(lead?.utm_campaign),
+    utm_content: coerce(lead?.utm_content), ad: coerce(lead?.ad),
+    company_name: coerce(lead?.company_name), address: coerce(lead?.address) });
   const [panelTab, setPanelTab] = useState("dados");
   const [loading, setLoading]   = useState(false);
   const [scheduling, setScheduling]     = useState(false);
   const [waFollowUp, setWaFollowUp]     = useState(false);
-  const [showReplies, setShowReplies]   = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const isEdit = !!lead?.id;
 
@@ -1481,14 +1570,6 @@ function LeadModal({ lead, companyId, userId, onClose, onSaved, team, onManageLa
                   {juliaPaused ? "Julia pausada ✓" : "WhatsApp"}
                 </button>
               )}
-              <button onClick={() => { setShowReplies(v => !v); }}
-                className={`flex-1 flex flex-col items-center justify-center gap-1 py-3 rounded-xl font-semibold text-xs transition hover:opacity-90 ${showReplies ? "ring-2 ring-sky-400" : ""}`}
-                style={{ background: "#F1F5F9", color: "#0EA5E9" }}>
-                <span className="text-xl leading-none">⚡</span>Resp. Rápidas
-                {quickReplies.length > 0 && (
-                  <span className="text-xs opacity-60">{quickReplies.length}</span>
-                )}
-              </button>
               <button onClick={() => setScheduling(true)}
                 className="flex-1 flex flex-col items-center justify-center gap-1 py-3 rounded-xl text-white font-semibold text-xs transition hover:opacity-90"
                 style={{ background: "#1a73e8" }}>
@@ -1509,11 +1590,6 @@ function LeadModal({ lead, companyId, userId, onClose, onSaved, team, onManageLa
                 </a>
               )}
             </div>
-          )}
-
-          {/* Quick replies dropdown */}
-          {isEdit && showReplies && (
-            <QuickRepliesPanel leadName={form.name} onClose={() => setShowReplies(false)} />
           )}
 
           {/* Labels bar */}
@@ -1660,6 +1736,12 @@ function LeadModal({ lead, companyId, userId, onClose, onSaved, team, onManageLa
               </div>
 
               <div className="flex gap-3 px-5 py-4 border-t border-slate-100">
+                {isEdit && onDelete && (
+                  <button onClick={() => onDelete(lead.id)}
+                    className="py-2.5 px-4 rounded-lg border border-red-200 text-sm font-semibold text-red-500 hover:bg-red-50 transition flex-shrink-0">
+                    Excluir
+                  </button>
+                )}
                 <button onClick={onClose} className="flex-1 py-2.5 rounded-lg border border-slate-200 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition">Cancelar</button>
                 <button onClick={save} disabled={loading || !form.name}
                   className="flex-1 py-2.5 rounded-lg text-white text-sm font-bold transition disabled:opacity-50"
@@ -2075,6 +2157,7 @@ export default function App() {
     if (!window.confirm("Remover este lead?")) return;
     const { error } = await supabase.from("leads").delete().eq("id", id);
     if (error) { window.alert("Erro ao remover lead: " + error.message); return; }
+    setModal(null);
     fetchLeads();
   };
   const handleMove = async (leadId, toStatus, fromStatus) => {
@@ -2129,7 +2212,7 @@ export default function App() {
             <div className="flex-1 flex flex-col overflow-hidden">
               <header className="h-14 bg-white border-b border-slate-100 flex items-center justify-between px-6 flex-shrink-0">
                 <h1 className="text-xs font-black text-slate-500 uppercase tracking-widest">
-                  {tab === "dashboard" ? "Dashboard" : tab === "julia" ? "🤖 Painel Julia" : "Leads"}
+                  {tab === "dashboard" ? "Dashboard" : tab === "julia" ? "🤖 Painel Julia" : tab === "respostas" ? "Respostas Rápidas" : "Leads"}
                 </h1>
                 <div className="flex items-center gap-3">
                   {tab === "leads" && pendingFollowUps > 0 && (
@@ -2198,6 +2281,8 @@ export default function App() {
                 {tab === "dashboard" && <Dashboard leads={leads} />}
 
                 {tab === "julia" && <JuliaView company={company} />}
+
+                {tab === "respostas" && <RespostasRapidasView />}
 
                 {tab === "leads" && (
                   <div>
@@ -2273,6 +2358,7 @@ export default function App() {
                 team={team}
                 onClose={() => setModal(null)}
                 onSaved={() => { setModal(null); fetchLeads(); }}
+                onDelete={handleDelete}
                 onManageLabels={() => setSettingsOpen(true)}
               />
             )}
