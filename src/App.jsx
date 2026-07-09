@@ -72,10 +72,11 @@ function hashTagColor(tag) {
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 
 // ─── CONTEXTS ───────────────────────────────────────────────────────────────────
-const StagesCtx      = createContext([]);
-const LabelsCtx      = createContext([]);
-const QuickRepliesCtx = createContext([]);
-const ThemeCtx       = createContext({ dark: false, toggle: () => {} });
+const StagesCtx        = createContext([]);
+const LabelsCtx        = createContext([]);
+const QuickRepliesCtx  = createContext([]);
+const ThemeCtx         = createContext({ dark: false, toggle: () => {} });
+const LeadsCtx         = createContext([]);
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────────
 function initials(name) {
@@ -412,15 +413,29 @@ function LabelPicker({ tags, onChange, onManageLabels }) {
 // ─── RESPOSTAS RÁPIDAS (módulo standalone) ───────────────────────────────────────
 function RespostasRapidasView() {
   const quickReplies = useContext(QuickRepliesCtx);
-  const [nome, setNome] = useState("");
-  const [search, setSearch] = useState("");
-  const [copiedId, setCopiedId] = useState(null);
+  const leads        = useContext(LeadsCtx);
 
-  const copy = (qr) => {
-    const text = qr.body.replace(/\{\{nome\}\}/g, nome.trim() || "Lead");
-    navigator.clipboard.writeText(text);
-    setCopiedId(qr.id);
-    setTimeout(() => setCopiedId(null), 2000);
+  const [selectedLeadId, setSelectedLeadId] = useState("");
+  const [leadSearch, setLeadSearch]         = useState("");
+  const [activeGroup, setActiveGroup]       = useState(null);
+  const [copiedId, setCopiedId]             = useState(null);
+  const [editingId, setEditingId]           = useState(null);
+  const [editBody, setEditBody]             = useState("");
+  const [saving, setSaving]                 = useState(false);
+  const [scriptSearch, setScriptSearch]     = useState("");
+  const [showLeadDrop, setShowLeadDrop]     = useState(false);
+
+  const selectedLead = leads.find(l => l.id === selectedLeadId) || null;
+
+  // resolve placeholders with lead data
+  const resolve = (text) => {
+    if (!text) return "";
+    return text
+      .replace(/\{\{nome\}\}/gi,    selectedLead?.name        || "[nome]")
+      .replace(/\{\{empresa\}\}/gi, selectedLead?.company_name || "[empresa]")
+      .replace(/\{\{cidade\}\}/gi,  selectedLead?.address      || "[cidade]")
+      .replace(/\{\{status\}\}/gi,  selectedLead?.status       || "[status]")
+      .replace(/\{\{telefone\}\}/gi,selectedLead?.phone        || "[telefone]");
   };
 
   const groupOf = (title) => {
@@ -428,60 +443,273 @@ function RespostasRapidasView() {
     return m ? m[1] : "Geral";
   };
 
-  const q = search.trim().toLowerCase();
-  const filtered = quickReplies.filter(qr =>
-    !q || qr.title.toLowerCase().includes(q) || qr.body.toLowerCase().includes(q));
+  // build unique groups preserving order
+  const allGroups = useMemo(() => {
+    const seen = [];
+    quickReplies.forEach(qr => {
+      const g = groupOf(qr.title);
+      if (!seen.includes(g)) seen.push(g);
+    });
+    return seen;
+  }, [quickReplies]);
 
-  const groups = {};
-  filtered.forEach(qr => { (groups[groupOf(qr.title)] ||= []).push(qr); });
+  // set default group
+  useEffect(() => {
+    if (allGroups.length > 0 && !activeGroup) setActiveGroup(allGroups[0]);
+  }, [allGroups]);
+
+  // filter replies by active group + search
+  const visibleReplies = useMemo(() => {
+    const q = scriptSearch.trim().toLowerCase();
+    return quickReplies.filter(qr => {
+      if (groupOf(qr.title) !== activeGroup) return false;
+      if (q && !qr.title.toLowerCase().includes(q) && !qr.body.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [quickReplies, activeGroup, scriptSearch]);
+
+  // filtered leads for dropdown
+  const filteredLeads = useMemo(() => {
+    const q = leadSearch.trim().toLowerCase();
+    if (!q) return leads.slice(0, 30);
+    return leads.filter(l =>
+      l.name?.toLowerCase().includes(q) ||
+      l.company_name?.toLowerCase().includes(q) ||
+      l.phone?.includes(q)
+    ).slice(0, 20);
+  }, [leads, leadSearch]);
+
+  const copy = (text) => {
+    const resolved = resolve(text);
+    navigator.clipboard.writeText(resolved).catch(() => {});
+  };
+
+  const startEdit = (qr) => {
+    setEditingId(qr.id);
+    setEditBody(qr.body);
+  };
+
+  const cancelEdit = () => { setEditingId(null); setEditBody(""); };
+
+  const saveEdit = async (qr) => {
+    if (!editBody.trim() || editBody === qr.body) { cancelEdit(); return; }
+    setSaving(true);
+    await supabase.from("quick_replies").update({ body: editBody.trim() }).eq("id", qr.id);
+    setSaving(false);
+    // update local context optimistically via window event so parent refetches
+    window.dispatchEvent(new CustomEvent("qr-updated"));
+    cancelEdit();
+  };
+
+  // group bar colors
+  const groupColors = [
+    { bar: "#0EA5E9", bg: "#F0F9FF", text: "#0369A1" },
+    { bar: "#8B5CF6", bg: "#F5F3FF", text: "#6D28D9" },
+    { bar: "#F59E0B", bg: "#FFFBEB", text: "#B45309" },
+    { bar: "#10B981", bg: "#ECFDF5", text: "#065F46" },
+    { bar: "#F87171", bg: "#FEF2F2", text: "#B91C1C" },
+    { bar: "#FB923C", bg: "#FFF7ED", text: "#C2410C" },
+  ];
+  const groupColor = (g) => groupColors[allGroups.indexOf(g) % groupColors.length];
+  const activeColor = activeGroup ? groupColor(activeGroup) : groupColors[0];
 
   return (
-    <div className="space-y-5 max-w-2xl">
-      <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm space-y-3">
-        <div className="text-xs font-black text-slate-500 uppercase tracking-widest">Contato</div>
-        <input
-          className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
-          placeholder="Nome de quem vai receber (opcional)"
-          value={nome} onChange={e => setNome(e.target.value)} />
-        <input
-          className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
-          placeholder="Buscar script..."
-          value={search} onChange={e => setSearch(e.target.value)} />
+    <div className="space-y-4 max-w-2xl">
+
+      {/* ── Lead Selector ── */}
+      <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 space-y-3">
+        <div className="text-xs font-black text-slate-400 uppercase tracking-widest">Lead selecionado</div>
+        <div className="relative">
+          <button
+            onClick={() => setShowLeadDrop(v => !v)}
+            className="w-full px-3 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm text-left flex items-center justify-between gap-2 hover:border-sky-400 transition focus:outline-none focus:ring-2 focus:ring-sky-500">
+            {selectedLead ? (
+              <span className="flex items-center gap-2 min-w-0">
+                <span className="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-white text-xs font-black"
+                  style={{ background: "linear-gradient(135deg,#0EA5E9,#6366F1)" }}>
+                  {initials(selectedLead.name)}
+                </span>
+                <span className="font-semibold text-slate-800 truncate">{selectedLead.name}</span>
+                {selectedLead.company_name && <span className="text-slate-400 text-xs truncate">{selectedLead.company_name}</span>}
+                <span className="ml-auto flex-shrink-0 text-xs px-2 py-0.5 rounded-full font-semibold"
+                  style={{ background: "#E0F2FE", color: "#0369A1" }}>{selectedLead.status}</span>
+              </span>
+            ) : (
+              <span className="text-slate-400">Selecionar lead para preencher os scripts automaticamente…</span>
+            )}
+            <span className="text-slate-300 flex-shrink-0">{showLeadDrop ? "▲" : "▼"}</span>
+          </button>
+
+          {showLeadDrop && (
+            <div className="absolute z-30 mt-1 w-full bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden">
+              <div className="p-2 border-b border-slate-100">
+                <input autoFocus
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
+                  placeholder="Buscar por nome, empresa ou telefone…"
+                  value={leadSearch} onChange={e => setLeadSearch(e.target.value)} />
+              </div>
+              <div className="max-h-60 overflow-y-auto divide-y divide-slate-50">
+                {selectedLead && (
+                  <button onClick={() => { setSelectedLeadId(""); setShowLeadDrop(false); setLeadSearch(""); }}
+                    className="w-full px-4 py-2.5 text-left text-xs text-slate-400 hover:bg-slate-50 transition">
+                    ✕ Limpar seleção
+                  </button>
+                )}
+                {filteredLeads.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-sm text-slate-400">Nenhum lead encontrado</div>
+                ) : filteredLeads.map(l => (
+                  <button key={l.id}
+                    onClick={() => { setSelectedLeadId(l.id); setShowLeadDrop(false); setLeadSearch(""); }}
+                    className={`w-full px-4 py-3 text-left flex items-center gap-3 hover:bg-sky-50 transition ${
+                      l.id === selectedLeadId ? "bg-sky-50" : ""
+                    }`}>
+                    <span className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-white text-xs font-black"
+                      style={{ background: "linear-gradient(135deg,#0EA5E9,#6366F1)" }}>
+                      {initials(l.name)}
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-semibold text-slate-800 truncate">{l.name}</span>
+                      <span className="block text-xs text-slate-400 truncate">{l.company_name || l.phone || l.status}</span>
+                    </span>
+                    <span className="flex-shrink-0 text-xs px-2 py-0.5 rounded-full font-semibold bg-slate-100 text-slate-500">{l.status}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* lead data chips */}
+        {selectedLead && (
+          <div className="flex flex-wrap gap-1.5">
+            {[["📞", selectedLead.phone],["🏢", selectedLead.company_name],["📍", selectedLead.address]].filter(([,v]) => v).map(([icon, val]) => (
+              <span key={val} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 text-xs">
+                {icon} {val}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {quickReplies.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-slate-300">
           <div className="text-5xl mb-3">⚡</div>
-          <div className="text-sm">Nenhuma resposta rápida cadastrada ainda.</div>
-          <div className="text-xs mt-1">Crie em Leads → Configurações → Respostas.</div>
+          <div className="text-sm">Nenhum script cadastrado ainda.</div>
+          <div className="text-xs mt-1">Crie em Configurações → Respostas.</div>
         </div>
-      ) : Object.entries(groups).map(([group, items]) => (
-        <div key={group} className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
-          <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 text-xs font-black text-slate-500 uppercase tracking-widest">{group}</div>
-          <div className="divide-y divide-slate-50">
-            {items.map(qr => (
-              <div key={qr.id} className="px-4 py-3 hover:bg-slate-50 transition">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-bold text-slate-700">{qr.title.replace(/^\[[^\]]+\]\s*/, "")}</div>
-                    <div className="text-xs text-slate-400 mt-1 whitespace-pre-wrap">
-                      {qr.body.replace(/\{\{nome\}\}/g, nome.trim() || "Lead")}
+      ) : (
+        <>
+          {/* ── Stage Tabs ── */}
+          <div className="flex gap-2 flex-wrap">
+            {allGroups.map(g => {
+              const c = groupColor(g);
+              const isActive = g === activeGroup;
+              return (
+                <button key={g} onClick={() => { setActiveGroup(g); setScriptSearch(""); }}
+                  className="px-4 py-2 rounded-xl text-xs font-black transition-all border"
+                  style={isActive
+                    ? { background: c.bar, color: "#fff", borderColor: c.bar, boxShadow: `0 2px 8px ${c.bar}50` }
+                    : { background: c.bg,  color: c.text, borderColor: c.bar + "40" }
+                  }>
+                  {g}
+                  <span className="ml-1.5 opacity-70">
+                    ({quickReplies.filter(qr => groupOf(qr.title) === g).length})
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* ── Script Search ── */}
+          <input
+            className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
+            placeholder={`Buscar script em ${activeGroup}…`}
+            value={scriptSearch} onChange={e => setScriptSearch(e.target.value)} />
+
+          {/* ── Script Cards ── */}
+          <div className="space-y-3">
+            {visibleReplies.length === 0 && (
+              <div className="text-center py-8 text-slate-400 text-sm">Nenhum script encontrado nesse grupo.</div>
+            )}
+            {visibleReplies.map(qr => {
+              const isEditing = editingId === qr.id;
+              const label = qr.title.replace(/^\[[^\]]+\]\s*/, "");
+              const preview = resolve(isEditing ? editBody : qr.body);
+              return (
+                <div key={qr.id}
+                  className="bg-white rounded-xl border shadow-sm overflow-hidden transition-all"
+                  style={{ borderColor: isEditing ? activeColor.bar : "#E2E8F0" }}>
+
+                  {/* header */}
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-slate-50"
+                    style={{ borderLeftWidth: 3, borderLeftColor: activeColor.bar, borderLeftStyle: "solid" }}>
+                    <span className="text-sm font-bold text-slate-700">{label}</span>
+                    <div className="flex items-center gap-1.5">
+                      {!isEditing && (
+                        <button onClick={() => startEdit(qr)}
+                          className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-500 hover:bg-slate-200 transition">
+                          ✎ Editar
+                        </button>
+                      )}
+                      <button
+                        onClick={() => {
+                          copy(isEditing ? editBody : qr.body);
+                          setCopiedId(qr.id);
+                          setTimeout(() => setCopiedId(null), 2000);
+                        }}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                          copiedId === qr.id
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "text-white"
+                        }`}
+                        style={copiedId === qr.id ? {} : { background: activeColor.bar }}>
+                        {copiedId === qr.id ? "✓ Copiado!" : "Copiar"}
+                      </button>
                     </div>
                   </div>
-                  <button onClick={() => copy(qr)}
-                    className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                      copiedId === qr.id
-                        ? "bg-emerald-100 text-emerald-700"
-                        : "bg-sky-50 text-sky-600 hover:bg-sky-100"
-                    }`}>
-                    {copiedId === qr.id ? "✓ Copiado!" : "Copiar"}
-                  </button>
+
+                  {/* body */}
+                  {isEditing ? (
+                    <div className="p-4 space-y-3">
+                      <textarea
+                        autoFocus
+                        className="w-full px-3 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-900 focus:outline-none focus:ring-2 transition resize-none"
+                        style={{ focusBorderColor: activeColor.bar }}
+                        rows={Math.max(4, editBody.split("\n").length + 1)}
+                        value={editBody} onChange={e => setEditBody(e.target.value)} />
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => saveEdit(qr)} disabled={saving}
+                          className="px-4 py-1.5 rounded-lg text-xs font-bold text-white transition disabled:opacity-50"
+                          style={{ background: activeColor.bar }}>
+                          {saving ? "Salvando…" : "Salvar"}
+                        </button>
+                        <button onClick={cancelEdit}
+                          className="px-4 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-500 hover:bg-slate-200 transition">
+                          Cancelar
+                        </button>
+                        <span className="ml-auto text-xs text-slate-400">
+                          Use {'{{nome}}'}, {'{{empresa}}'}, {'{{cidade}}'}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="px-4 py-3">
+                      <p className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed">{preview}</p>
+                      {selectedLead && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {preview.includes("[nome]") && <span className="text-xs text-orange-500 bg-orange-50 px-2 py-0.5 rounded-full">nome não preenchido</span>}
+                          {preview.includes("[empresa]") && <span className="text-xs text-orange-500 bg-orange-50 px-2 py-0.5 rounded-full">empresa não preenchida</span>}
+                          {preview.includes("[cidade]") && <span className="text-xs text-orange-500 bg-orange-50 px-2 py-0.5 rounded-full">cidade não preenchida</span>}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
-        </div>
-      ))}
+        </>
+      )}
     </div>
   );
 }
@@ -2242,9 +2470,17 @@ export default function App() {
   const pendingFollowUps = leads.filter(l => l.follow_up_at && l.follow_up_at <= today).length;
   const sel = "px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500 transition";
 
+  // refetch quick_replies when RespostasRapidasView edits inline
+  useEffect(() => {
+    const handler = () => fetchQuickReplies();
+    window.addEventListener("qr-updated", handler);
+    return () => window.removeEventListener("qr-updated", handler);
+  }, [fetchQuickReplies]);
+
   return (
     <StagesCtx.Provider value={stages}>
       <LabelsCtx.Provider value={labels}>
+        <LeadsCtx.Provider value={leads}>
         <QuickRepliesCtx.Provider value={quickReplies}>
           <div className="flex h-screen overflow-hidden app-bg">
             <Sidebar company={company} user={user} tab={tab} setTab={setTab}
@@ -2417,6 +2653,7 @@ export default function App() {
             )}
           </div>
         </QuickRepliesCtx.Provider>
+        </LeadsCtx.Provider>
       </LabelsCtx.Provider>
     </StagesCtx.Provider>
   );
